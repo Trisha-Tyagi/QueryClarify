@@ -128,23 +128,54 @@ def hybrid_scores(question, db, embedding_model, alpha=0.4):
     return results
 
 
+
 def select_columns(hybrid_results, top_k=5):
+    """
+    Select the highest-scoring columns while preserving
+    useful lexical matches from already-selected tables.
+    """
+
+    if not hybrid_results:
+        return []
+
+    # Rank all columns by their hybrid score.
+    ranked_results = sorted(
+        hybrid_results,
+        key=lambda item: item[3],
+        reverse=True
+    )
+
+    # Select the top-ranked columns.
     selected_columns = [
         column
         for column, lexical, semantic, hybrid
-        in hybrid_results[:top_k]
+        in ranked_results[:top_k]
     ]
 
+    # Identify tables represented in the initial selection.
     selected_tables = {
         column.split(".", 1)[0]
         for column in selected_columns
     }
 
-    for column, lexical, semantic, hybrid in hybrid_results:
+    # Add lexically relevant columns from those same tables.
+    # Limit additions to avoid sending the entire schema to the LLM.
+    max_extra_columns = 10
+    extra_count = 0
+
+    for column, lexical, semantic, hybrid in ranked_results[top_k:]:
         table = column.split(".", 1)[0]
 
-        if table in selected_tables and lexical > 0:
-            if column not in selected_columns:
-                selected_columns.append(column)
+        if (
+            table in selected_tables
+            and lexical > 0
+            and column not in selected_columns
+        ):
+            selected_columns.append(column)
+            extra_count += 1
+
+        if extra_count >= max_extra_columns:
+            break
 
     return selected_columns
+

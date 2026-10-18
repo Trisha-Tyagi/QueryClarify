@@ -17,7 +17,6 @@ def expand_related_tables(db, selected_tables):
 
     return list(expanded_tables)
 
-
 def expand_relationships(db, selected_columns):
 
     expanded_columns = set(selected_columns)
@@ -66,6 +65,7 @@ def expand_relationships(db, selected_columns):
             relationships.append(relationship)
 
     return sorted(expanded_columns), relationships
+
 
 def get_relevant_relationships(db, selected_columns):
 
