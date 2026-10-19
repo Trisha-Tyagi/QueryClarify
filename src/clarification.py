@@ -45,18 +45,67 @@ def prepare_schema_context(question, db, embedding_model, top_k=5):
 
 def detect_ambiguity(question, schema_context, model, tokenizer):
 
-    system_prompt = (
-        "You are an ambiguity detector for a Text-to-SQL system. "
-        "Determine whether the user's question has multiple materially "
-        "different interpretations that would produce different SQL queries. "
-        "Do not clarify questions that are sufficiently clear. "
-        "Do not assume a column is missing just because it is absent from "
-        "the provided schema context. Ask only one concise question when "
-        "necessary. Return ONLY valid JSON with exactly these keys: "
-        '"needs_clarification" (boolean), "reason" (string), '
-        'and "clarification_question" (string). '
-        "If clarification is unnecessary, use false and empty strings."
-    )
+    system_prompt = """
+    You are a careful ambiguity detector for a Text-to-SQL system.
+
+    Your task is to decide whether a user question genuinely needs
+    clarification before SQL can be generated.
+
+    IMPORTANT RULES:
+
+    1. Set needs_clarification to TRUE only when the question has
+      at least two reasonable interpretations that would produce
+      materially different SQL queries.
+
+    2. Do NOT ask clarification questions just because the user
+      uses informal wording, plural nouns, or a synonym for a
+      table name. Use the provided schema to identify tables
+      and columns.
+
+    3. Do NOT ask which columns the user wants if the requested
+      information is already stated or reasonably implied.
+
+    4. Treat common database language as clear:
+      - "youngest singer" means the singer with the minimum age.
+      - "oldest singer" means the singer with the maximum age.
+      - "descending order of age" means age from highest to lowest.
+      - "different countries" means distinct countries.
+      - "singers above age 20" means singers whose age is greater
+        than 20.
+
+    5. Do NOT invent ambiguity. If a reasonable interpretation
+      is clear from the question and schema, set
+      needs_clarification to FALSE.
+
+    6. Ask for clarification when essential information is missing
+      or two plausible interpretations would lead to materially
+      different results. For example, "Show me the details" may
+      not specify which entity or information is wanted.
+
+    7. Do not confuse a difficult SQL query with an ambiguous
+      question. If the question is clear but complex, do not
+      request clarification.
+
+    OUTPUT REQUIREMENTS:
+
+    Return ONLY one valid JSON object with exactly these keys:
+    - "needs_clarification": a JSON boolean
+    - "reason": a string
+    - "clarification_question": a string
+
+    If clarification is NOT needed:
+    - needs_clarification must be false
+    - reason must be an empty string
+    - clarification_question must be an empty string
+
+    If clarification IS needed:
+    - needs_clarification must be true
+    - reason must briefly explain the genuine ambiguity
+    - clarification_question must contain one concise question
+      that resolves that ambiguity
+
+    Never return missing keys, null values, or text outside the JSON.
+    """
 
     user_prompt = (
         "Relevant database schema:\n"
@@ -131,23 +180,32 @@ def detect_ambiguity(question, schema_context, model, tokenizer):
         )
 
 
-    if not isinstance(result.get("reason"), str):
-        raise ValueError("Invalid reason value.")
+        # Validate the reason.
+    reason = result.get("reason", "")
 
-    if not isinstance(result.get("clarification_question"), str):
-        raise ValueError("Invalid clarification_question value.")
+    if not isinstance(reason, str):
+        reason = str(reason) if reason is not None else ""
+
+    # Validate the clarification question according to the decision.
+    clarification_question = result.get("clarification_question", "")
 
     if result["needs_clarification"]:
-        if not result["clarification_question"].strip():
-            raise ValueError("Clarification question is missing.")
-    else:
-        result["reason"] = ""
-        result["clarification_question"] = ""
+        if not isinstance(clarification_question, str):
+            clarification_question = ""
 
+        if not clarification_question.strip():
+            raise ValueError(
+                "Clarification is required, but the detector "
+                "did not provide a valid clarification question."
+            )
+    else:
+        # A clear question does not need a clarification question.
+        reason = ""
+        clarification_question = ""
     return {
         "needs_clarification": result["needs_clarification"],
-        "reason": result["reason"],
-        "clarification_question": result["clarification_question"]
+        "reason": reason,
+        "clarification_question": clarification_question
     }
 
 
