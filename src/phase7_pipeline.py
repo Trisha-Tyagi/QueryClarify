@@ -1,6 +1,7 @@
 
 from pipeline import run_pipeline
 from clarification import prepare_schema_context, detect_ambiguity
+from sql_generator import clean_sql
 
 
 MAX_CLARIFICATIONS = 2
@@ -46,8 +47,9 @@ def _run_phase6(
 
     return {
         "status": "completed",
+        "db_id": db_id,
         "question": question,
-        "predicted_sql": result["predicted_sql"],
+        "predicted_sql": clean_sql(result["predicted_sql"]),
         "schema_context": result["schema_context"],
         "selected_columns": result["selected_columns"],
         "expanded_columns": result["expanded_columns"],
@@ -246,6 +248,12 @@ def evaluate_phase7(
 
     This evaluation does not invent clarification answers.
     """
+
+    if not isinstance(checkpoint_every, int) or checkpoint_every < 1:
+        raise ValueError("checkpoint_every must be a positive integer.")
+
+    save_dir = os.path.dirname(save_path)
+    os.makedirs(save_dir or ".", exist_ok=True)
 
     if limit is not None:
         sample = sample[:limit]

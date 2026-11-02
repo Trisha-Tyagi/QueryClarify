@@ -1,4 +1,6 @@
 
+import re
+
 import nltk
 from nltk import pos_tag
 from nltk.stem import WordNetLemmatizer
@@ -6,9 +8,25 @@ from nltk.corpus import stopwords, wordnet
 from sentence_transformers import util
 
 
-# Initialize text-processing resources
+# NLTK data is optional. Some environments cannot download its corpora/taggers;
+# in that case use lightweight built-in tokenization and stop words.
+_FALLBACK_STOP_WORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from",
+    "how", "in", "is", "it", "of", "on", "or", "show", "that", "the",
+    "their", "this", "to", "what", "which", "who", "with",
+}
 lemmatizer = WordNetLemmatizer()
-stop_words = set(stopwords.words("english"))
+try:
+    stop_words = set(stopwords.words("english"))
+    for resource in (
+        "corpora/wordnet", "taggers/averaged_perceptron_tagger_eng",
+        "tokenizers/punkt", "tokenizers/punkt_tab",
+    ):
+        nltk.data.find(resource)
+    _NLTK_RESOURCES_AVAILABLE = True
+except LookupError:
+    stop_words = _FALLBACK_STOP_WORDS
+    _NLTK_RESOURCES_AVAILABLE = False
 
 
 def get_wordnet_pos(tag):
@@ -26,21 +44,30 @@ def get_wordnet_pos(tag):
 
 def preprocess_question(question):
     question = question.lower()
-    tokens = nltk.word_tokenize(question)
-    tagged_tokens = pos_tag(tokens)
+    if _NLTK_RESOURCES_AVAILABLE:
+        tokens = nltk.word_tokenize(question)
+        tagged_tokens = pos_tag(tokens)
+        normalized_words = [
+            lemmatizer.lemmatize(word, get_wordnet_pos(tag))
+            for word, tag in tagged_tokens
+            if word.isalpha()
+        ]
+        return [word for word in normalized_words if word not in stop_words]
 
-    normalized_words = [
-        lemmatizer.lemmatize(word, get_wordnet_pos(tag))
-        for word, tag in tagged_tokens
-        if word.isalpha()
-    ]
-
-    filtered_words = [
-        word for word in normalized_words
-        if word not in stop_words
-    ]
-
-    return filtered_words
+    tokens = re.findall(r"[a-z]+", question)
+    normalized_words = []
+    for word in tokens:
+        if len(word) > 4 and word.endswith("ies"):
+            word = word[:-3] + "y"
+        elif len(word) > 4 and word.endswith("ing"):
+            word = word[:-3]
+        elif len(word) > 3 and word.endswith("ed"):
+            word = word[:-2]
+        elif len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
+            word = word[:-1]
+        if word not in stop_words:
+            normalized_words.append(word)
+    return normalized_words
 
 
 def lexical_scores(question, db):

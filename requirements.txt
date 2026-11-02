@@ -1,0 +1,6 @@
+streamlit
+torch
+transformers
+accelerate
+sentence-transformers
+nltk
